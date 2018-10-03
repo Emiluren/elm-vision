@@ -94,6 +94,8 @@ void main () {
 fragmentShader : WebGL.Shader {} Uniforms {}
 fragmentShader = [glsl|
 
+precision mediump float;
+
 uniform vec3 color;
 
 void main () {

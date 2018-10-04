@@ -6,6 +6,8 @@ import Math.Vector2 as Vec2 exposing (Vec2, vec2)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 import WebGL
 
+import NonEmptyList
+
 type alias Model = ()
 
 main : Program () Model msg
@@ -13,8 +15,14 @@ main = Browser.sandbox { init = (), update = \_ x -> x, view = view }
 
 view : Model -> Html msg
 view model =
-    WebGL.toHtml [ Html.width 650, Html.height 750 ]
-        (List.map (polygon { color = black }) level)
+    let
+        entities =
+            List.concat
+                [ List.map (polygon { color = black }) level
+                , line { color = red } (rayCastlevel (vec3 0 0 0))
+                ]
+    in
+        WebGL.toHtml [ Html.width 650, Html.height 750 ] entities
 
 type alias LineAttributes =
     { position : Vec2
@@ -52,6 +60,43 @@ findIntersection ray seg =
         else
             Nothing
 
+rayCast : Ray -> (Vec2, Vec2)
+rayCast ray =
+    let
+        hits = List.filterMap (findIntersection ray) levelSegments
+    in
+        case NonEmptyList.fromList hits of
+            Nothing -> (ray.pos, ray.dir)
+            Just l -> (ray.pos, (NonEmptyList.findMin .t1 l).pos)
+
+rayCastLevel : Vec2 -> List (Vec2, Vec2)
+rayCastLevel startPoint = List.map (Ray startPoint) (List.concat level)
+
+headAndLast : List a -> Maybe (a, a)
+headAndLast [] = Nothing
+headAndLast (x::xs) =
+    let
+        findLast [] = Nothing
+        findLast x::[] = Just x
+        findLast _::xs = findLast xs
+    in
+        case findLast xs of
+            Nothing -> Nothing
+            Just last -> Just (x, last)
+
+combineConsecutive : (a -> a -> b) -> List a -> Maybe (List b)
+combineConsecutive combFun list =
+    let
+        internal [] = []
+        internal (_::[]) = []
+        internal (x::y::xs) = combFun x y :: internal (y::xs)
+    in
+        case headAndLast list of
+            Nothing -> Nothing
+
+levelSegments : List Ray
+levelSegments = List.map (combineConsecutive Ray) level
+
 level : List (List Vec2)
 level =
     -- Left
@@ -77,6 +122,16 @@ polygon : Uniforms -> List Vec2 -> WebGL.Entity
 polygon uniforms vertices =
     let
         mesh = WebGL.lineLoop (List.map LineAttributes vertices)
+    in
+        WebGL.entity vertexShader fragmentShader mesh uniforms
+
+concatTupleList : List (a, a) -> List a
+concatTupleList = List.foldr (\(x1, x2) acc -> x1::x2::acc)
+
+lines : Uniforms -> List (Vec2, Vec2) -> WebGL.Entity
+lines uniforms vertices =
+    let
+        mesh = WebGL.lines (List.map LineAttributes vertices)
     in
         WebGL.entity vertexShader fragmentShader mesh uniforms
 

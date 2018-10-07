@@ -13,8 +13,8 @@ fromList list =
         [] -> Nothing
         (x::xs) -> Just { head = x, tail = xs }
 
-foldl : (a -> b -> b) -> NonEmptyList a -> b
-foldl f { head, tail } = List.foldl f head tail
+-- foldl : (a -> b -> b) -> NonEmptyList a -> b
+-- foldl f { head, tail } = List.foldl f head tail
 
 findMin : (a -> comparable) -> NonEmptyList a -> a
-findMin f = foldl compareMin Nothing
+findMin f = 

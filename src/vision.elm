@@ -16,13 +16,10 @@ main = Browser.sandbox { init = (), update = \_ x -> x, view = view }
 view : Model -> Html msg
 view model =
     let
-        entities =
-            List.concat
-                [ List.map (polygon { color = black }) level
-                , line { color = red } (rayCastlevel (vec3 0 0 0))
-                ]
+        rays = lines { color = red } (rayCastLevel (vec2 0 0))
+        levelShapes = List.map (polygon { color = black }) level
     in
-        WebGL.toHtml [ Html.width 650, Html.height 750 ] entities
+        WebGL.toHtml [ Html.width 650, Html.height 750 ] (rays :: levelShapes)
 
 type alias LineAttributes =
     { position : Vec2
@@ -43,8 +40,8 @@ type alias RayHit =
 findIntersection : Ray -> Ray -> Maybe RayHit
 findIntersection ray seg =
     let
-        t2 = (ray.pos.x*(seg.pos.y-ray.pos.y) +
-              ray.dir.y*(ray.pos.x-seg.pos.x)) /
+        t2 = (ray.dir.x * (seg.pos.y - ray.pos.y) +
+              ray.dir.y * (ray.pos.x - seg.pos.x)) /
              (seg.dir.x*ray.dir.y - seg.dir.y*ray.dir.x)
         t1 = (seg.pos.x + seg.dir.x*t2 - ray.pos.x) / ray.dir.x
         dirVec = Vec2.fromRecord ray.dir
@@ -66,36 +63,49 @@ rayCast ray =
         hits = List.filterMap (findIntersection ray) levelSegments
     in
         case NonEmptyList.fromList hits of
-            Nothing -> (ray.pos, ray.dir)
-            Just l -> (ray.pos, (NonEmptyList.findMin .t1 l).pos)
+            Nothing -> (Vec2.fromRecord ray.pos, Vec2.fromRecord ray.dir)
+            Just l -> (Vec2.fromRecord ray.pos, (NonEmptyList.findMin .t1 l).point)
 
 rayCastLevel : Vec2 -> List (Vec2, Vec2)
-rayCastLevel startPoint = List.map (Ray startPoint) (List.concat level)
+rayCastLevel startPoint =
+    let
+        rays =
+            List.map
+                (Ray <| Vec2.toRecord startPoint)
+                (List.map Vec2.toRecord <| List.concat level)
+    in
+        List.map rayCast rays
 
 headAndLast : List a -> Maybe (a, a)
-headAndLast [] = Nothing
-headAndLast (x::xs) =
+headAndLast list =
     let
-        findLast [] = Nothing
-        findLast x::[] = Just x
-        findLast _::xs = findLast xs
+        findLast l =
+            case l of
+                [] -> Nothing
+                (x::[]) -> Just x
+                (_::xs) -> findLast xs
     in
-        case findLast xs of
-            Nothing -> Nothing
-            Just last -> Just (x, last)
+        Maybe.map2
+            (\x y -> (x, y))
+            (List.head list)
+            (Maybe.andThen findLast <| List.tail list)
 
-combineConsecutive : (a -> a -> b) -> List a -> Maybe (List b)
+combineConsecutive : (a -> a -> b) -> List a -> List b
 combineConsecutive combFun list =
     let
-        internal [] = []
-        internal (_::[]) = []
-        internal (x::y::xs) = combFun x y :: internal (y::xs)
+        internal l =
+            case l of
+                [] -> []
+                (_::[]) -> []
+                (x::y::xs) -> combFun x y :: internal (y::xs)
     in
         case headAndLast list of
-            Nothing -> Nothing
+            Nothing -> []
+            Just (h, l) -> combFun h l :: internal list
 
 levelSegments : List Ray
-levelSegments = List.map (combineConsecutive Ray) level
+levelSegments =
+    List.concatMap (combineConsecutive Ray) <| List.map (List.map Vec2.toRecord) level
 
 level : List (List Vec2)
 level =
@@ -114,6 +124,9 @@ type alias Color = Vec3
 black : Color
 black = vec3 0 0 0
 
+red : Color
+red = vec3 1 0 0
+
 type alias Uniforms =
     { color : Color
     }
@@ -126,14 +139,15 @@ polygon uniforms vertices =
         WebGL.entity vertexShader fragmentShader mesh uniforms
 
 concatTupleList : List (a, a) -> List a
-concatTupleList = List.foldr (\(x1, x2) acc -> x1::x2::acc)
+concatTupleList = List.concatMap (\(x1, x2) -> [x1, x2])
 
 lines : Uniforms -> List (Vec2, Vec2) -> WebGL.Entity
 lines uniforms vertices =
     let
-        mesh = WebGL.lines (List.map LineAttributes vertices)
+        mesh = WebGL.lines (List.map (Tuple.mapBoth LineAttributes LineAttributes) vertices)
     in
         WebGL.entity vertexShader fragmentShader mesh uniforms
+
 
 vertexShader : WebGL.Shader LineAttributes u {}
 vertexShader = [glsl|
@@ -145,6 +159,7 @@ void main () {
 }
 
 |]
+
 
 fragmentShader : WebGL.Shader {} Uniforms {}
 fragmentShader = [glsl|

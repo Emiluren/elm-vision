@@ -1,6 +1,8 @@
 import Browser
+import Browser.Events as Events
 import Html exposing (Html)
 import Html.Attributes as Html
+import Json.Decode as D
 import List
 import Math.Vector2 as Vec2 exposing (Vec2, vec2)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
@@ -8,15 +10,51 @@ import WebGL
 
 import NonEmptyList
 
-type alias Model = ()
+type alias Model =
+    { mousePosition : Vec2 }
 
-main : Program () Model msg
-main = Browser.sandbox { init = (), update = \_ x -> x, view = view }
+type Msg = MouseMoved Vec2Rec
 
-view : Model -> Html msg
+canvasWidth : Float
+canvasWidth = 650
+
+canvasHeight : Float
+canvasHeight = 750
+
+main : Program () Model Msg
+main = Browser.element
+    { init = \_ -> (Model (vec2 0.2 0.2), Cmd.none)
+    , update = update
+    , view = view
+    , subscriptions = subscriptions
+    }
+
+subscriptions : model -> Sub Msg
+subscriptions _ =
+    Sub.map MouseMoved <|
+        Events.onMouseMove <|
+            D.map2 Vec2Rec
+                (D.field "clientX" D.float)
+                (D.field "clientY" D.float)
+
+update : Msg -> Model -> (Model, Cmd Msg)
+update msg model =
+    case msg of
+        MouseMoved pos ->
+            ( { model | mousePosition =
+                    vec2
+                        (pos.x / canvasWidth * 2 - 1)
+                        (pos.y / -canvasHeight * 2 + 1)
+              }
+            , Cmd.none
+            )
+
+view : Model -> Html Msg
 view model =
     let
-        rays = lines { color = red } (rayCastLevel (vec2 0 0))
+        rays = lines { color = red } (rayCastLevel model.mousePosition)
+        --rays = lines { color = red }
+        --           [ rayCast { pos = Vec2Rec 0 0, dir = Vec2.toRecord model.mousePosition } ]
         levelShapes = List.map (polygon { color = black }) level
     in
         WebGL.toHtml [ Html.width 650, Html.height 750 ] (rays :: levelShapes)
@@ -46,7 +84,7 @@ findIntersection ray seg =
         t1 = (seg.pos.x + seg.dir.x*t2 - ray.pos.x) / ray.dir.x
         dirVec = Vec2.fromRecord ray.dir
     in
-        if t1 > 0 && 0 < t2 && t2 < 1 then
+        if t1 > 0 && -0.02 < t2 && t2 < 1.02 then
             Just
                 { t1 = t1
                 , point =
@@ -68,13 +106,8 @@ rayCast ray =
 
 rayCastLevel : Vec2 -> List (Vec2, Vec2)
 rayCastLevel startPoint =
-    let
-        rays =
-            List.map
-                (Ray <| Vec2.toRecord startPoint)
-                (List.map Vec2.toRecord <| List.concat level)
-    in
-        List.map rayCast rays
+    let rays = List.map (rayFromPoints startPoint) (List.concat level)
+    in List.map rayCast rays
 
 headAndLast : List a -> Maybe (a, a)
 headAndLast list =
@@ -103,9 +136,15 @@ combineConsecutive combFun list =
             Nothing -> []
             Just (h, l) -> combFun h l :: internal list
 
+rayFromPoints : Vec2 -> Vec2 -> Ray
+rayFromPoints start end =
+    { pos = Vec2.toRecord start
+    , dir = Vec2.toRecord (Vec2.sub end start)
+    }
+
 levelSegments : List Ray
 levelSegments =
-    List.concatMap (combineConsecutive Ray) <| List.map (List.map Vec2.toRecord) level
+    List.concatMap (combineConsecutive rayFromPoints) level
 
 level : List (List Vec2)
 level =
@@ -117,6 +156,8 @@ level =
     , [ vec2 0.3 0.8, vec2 0.6 0.2 , vec2 0.2 0.3 ]
     , [ vec2 0.8 0, vec2 0.4 -0.2, vec2 0.5 0.1 ]
     , [ vec2 0.7 -0.55, vec2 0.6 -0.6, vec2 0.5 -0.5, vec2 0.55 -0.4]
+    -- Borders
+    , [ vec2 -1 1, vec2 1 1, vec2 1 -1, vec2 -1 -1]
     ]
 
 type alias Color = Vec3

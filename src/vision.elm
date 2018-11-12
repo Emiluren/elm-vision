@@ -49,15 +49,25 @@ update msg model =
             , Cmd.none
             )
 
+visibilityShapes : List (Vec2, Vec2) -> WebGL.Entity
+visibilityShapes rayPoints =
+    List.sortBy (\(v1, v2) -> atan2
+                     (Vec2.getX v2 - Vec2.getX v1)
+                     (Vec2.getY v2 - Vec2.getY v1))
+        rayPoints
+        |> combineConsecutive (\(start, c1) (_, c2) -> ( start, c1, c2 ))
+        |> filledTriangles { color = red }
+
 view : Model -> Html Msg
 view model =
     let
-        rays = lines { color = red } (rayCastLevel model.mousePosition)
+        rays = rayCastLevel model.mousePosition
         --rays = lines { color = red }
         --           [ rayCast { pos = Vec2Rec 0 0, dir = Vec2.toRecord model.mousePosition } ]
         levelShapes = List.map (polygon { color = black }) level
     in
-        WebGL.toHtml [ Html.width 650, Html.height 750 ] (rays :: levelShapes)
+        WebGL.toHtml [ Html.width 650, Html.height 750 ]
+            ((visibilityShapes rays) :: levelShapes)
 
 type alias LineAttributes =
     { position : Vec2
@@ -84,7 +94,7 @@ findIntersection ray seg =
         t1 = (seg.pos.x + seg.dir.x*t2 - ray.pos.x) / ray.dir.x
         dirVec = Vec2.fromRecord ray.dir
     in
-        if t1 > 0 && -0.02 < t2 && t2 < 1.02 then
+        if t1 > 0 && -0.005 < t2 && t2 < 1.005 then
             Just
                 { t1 = t1
                 , point =
@@ -104,9 +114,34 @@ rayCast ray =
             Nothing -> (Vec2.fromRecord ray.pos, Vec2.fromRecord ray.dir)
             Just l -> (Vec2.fromRecord ray.pos, (NonEmptyList.findMin .t1 l).point)
 
+vecFromAngle : Float -> Float -> Vec2Rec
+vecFromAngle angle length =
+    vec2 (cos angle) (sin angle)
+        |> Vec2.scale length
+        |> Vec2.toRecord
+
+extraRays : Vec2 -> Vec2 -> List Ray
+extraRays start end =
+    let pos = Vec2.toRecord start
+        dir = Vec2.toRecord (Vec2.sub end start)
+        angle = atan2 dir.y dir.x
+        a1 = angle - 0.01
+        a2 = angle + 0.01
+        length = Vec2.length (Vec2.fromRecord dir)
+    in [ { pos = pos
+         , dir = dir
+         }
+       , { pos = pos
+         , dir = vecFromAngle a1 length
+         }
+       , { pos = pos
+         , dir = vecFromAngle a2 length
+         }
+       ]
+
 rayCastLevel : Vec2 -> List (Vec2, Vec2)
 rayCastLevel startPoint =
-    let rays = List.map (rayFromPoints startPoint) (List.concat level)
+    let rays = List.concatMap (extraRays startPoint) (List.concat level)
     in List.map rayCast rays
 
 headAndLast : List a -> Maybe (a, a)
@@ -176,6 +211,19 @@ polygon : Uniforms -> List Vec2 -> WebGL.Entity
 polygon uniforms vertices =
     let
         mesh = WebGL.lineLoop (List.map LineAttributes vertices)
+    in
+        WebGL.entity vertexShader fragmentShader mesh uniforms
+
+filledTriangles : Uniforms -> List (Vec2, Vec2, Vec2) -> WebGL.Entity
+filledTriangles uniforms vertices =
+    let
+        mesh = WebGL.triangles (List.map (\(a, b, c) ->
+                                              ( LineAttributes a
+                                              , LineAttributes b
+                                              , LineAttributes c
+                                              )
+                                         )
+                                    vertices)
     in
         WebGL.entity vertexShader fragmentShader mesh uniforms
 
